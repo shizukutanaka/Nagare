@@ -1,0 +1,1297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nagare — サーバーレス P2P ライブ配信 / Serverless P2P Live Streaming</title>
+<style>
+  :root {
+    --bg: #0f1419; --panel: #1a222c; --panel2: #232f3d; --line: #33465c;
+    --text: #e8eef4; --sub: #9db2c6; --accent: #3fa7ff; --accent2: #2bd98a;
+    --warn: #ffb648; --err: #ff6b6b; --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         background: var(--bg); color: var(--text); line-height: 1.5; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+           padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 22px; margin: 0; letter-spacing: .04em; }
+  header .tag { color: var(--sub); font-size: 13px; }
+  .spacer { flex: 1; }
+  .langbtn { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+             border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  .langbtn.active { border-color: var(--accent); color: var(--accent); }
+  main { max-width: 1180px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .statusbar { display: flex; flex-wrap: wrap; gap: 8px 22px; background: var(--panel);
+               border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; font-size: 14px; }
+  .statusbar b { color: var(--accent2); font-weight: 600; }
+  .statusbar .err { color: var(--err); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  section.card { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: var(--radius); padding: 14px 16px; }
+  section.card h2 { font-size: 17px; margin: 0 0 10px; }
+  section.card h3 { font-size: 14px; margin: 14px 0 6px; color: var(--sub); }
+  video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; }
+  video.audioonly { aspect-ratio: auto; height: 54px; }
+  label { display: block; font-size: 13px; color: var(--sub); margin: 8px 0 3px; }
+  input[type="text"], input[type="password"], input[type="number"], select, textarea {
+    width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 7px 9px; font: inherit; font-size: 14px; }
+  textarea { min-height: 64px; resize: vertical; word-break: break-all; font-size: 12px; }
+  textarea.code { font-family: ui-monospace, monospace; }
+  button { background: var(--accent); color: #06121f; border: 0; border-radius: 6px;
+           padding: 8px 14px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+  button.danger { background: var(--err); color: #1f0606; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .row > * { flex: 0 0 auto; }
+  .grow { flex: 1 1 auto; }
+  .note { font-size: 12.5px; color: var(--sub); }
+  .warn { color: var(--warn); font-size: 13px; }
+  .err { color: var(--err); font-size: 13.5px; }
+  .ok { color: var(--accent2); }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px;
+          border: 1px solid var(--line); background: var(--panel2); }
+  .pill.connected { border-color: var(--accent2); color: var(--accent2); }
+  .pill.failed { border-color: var(--err); color: var(--err); }
+  details.settings { background: var(--panel); border: 1px solid var(--line);
+                     border-radius: var(--radius); padding: 10px 16px; }
+  details.settings summary { cursor: pointer; font-weight: 600; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 18px; }
+  @media (max-width: 700px) { .cols { grid-template-columns: 1fr; } }
+  #chatLog, #eventLog { height: 190px; overflow-y: auto; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13.5px; }
+  #eventLog { height: 130px; font-size: 12.5px; color: var(--sub); }
+  #chatLog .me { color: var(--accent); }
+  #chatLog .sys, #eventLog .sys { color: var(--sub); }
+  #eventLog .err { color: var(--err); }
+  .child { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0;
+           border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nagare</h1>
+  <span class="tag" data-i18n="tagline">サーバーなしで届ける、ライブ配信</span>
+  <span class="spacer"></span>
+  <button class="langbtn" id="langJa" type="button">日本語</button>
+  <button class="langbtn" id="langEn" type="button">English</button>
+</header>
+
+<main>
+  <div class="statusbar" aria-live="polite">
+    <span><span data-i18n="stState">状態</span>: <b id="statusState">—</b></span>
+    <span><span data-i18n="stViewers">視聴者</span>: <b id="statusViewers">0</b></span>
+    <span><span data-i18n="stUp">送信</span>: <b id="statusUp">0 kbps</b></span>
+    <span><span data-i18n="stDown">受信</span>: <b id="statusDown">0 kbps</b></span>
+    <span class="err" id="statusError"></span>
+  </div>
+
+  <details class="settings">
+    <summary data-i18n="settings">設定（名前・STUN/TURN・ツリー上限）</summary>
+    <div class="cols">
+      <div>
+        <label for="setName" data-i18n="setName">表示名</label>
+        <input type="text" id="setName" maxlength="40">
+        <label for="setStun" data-i18n="setStun">STUN サーバー（1行に1つ）</label>
+        <textarea id="setStun" rows="3"></textarea>
+        <label for="setQualityDefault" data-i18n="setNote">設定はこの端末内にのみ保存されます。サーバーへは送信されません。</label>
+      </div>
+      <div>
+        <label for="setTurnUrl" data-i18n="setTurnUrl">TURN URL（任意・自分で用意したものだけ）</label>
+        <input type="text" id="setTurnUrl" placeholder="turn:turn.example.com:3478">
+        <label for="setTurnUser" data-i18n="setTurnUser">TURN ユーザー名</label>
+        <input type="text" id="setTurnUser">
+        <label for="setTurnPass" data-i18n="setTurnPass">TURN パスワード</label>
+        <input type="password" id="setTurnPass">
+        <div class="row">
+          <div class="grow">
+            <label for="setMaxChildren" data-i18n="setMaxChildren">1人あたりの最大中継数</label>
+            <input type="number" id="setMaxChildren" min="1" max="6" step="1">
+          </div>
+          <div class="grow">
+            <label for="setMaxDepth" data-i18n="setMaxDepth">中継の最大段数</label>
+            <input type="number" id="setMaxDepth" min="1" max="8" step="1">
+          </div>
+        </div>
+        <p class="note" data-i18n="turnNote">TURN を使うと映像はその TURN サーバーを経由します（運営者には通信の存在が見えます）。Nagare 自体は TURN を用意しません。</p>
+      </div>
+    </div>
+  </details>
+
+  <div class="grid">
+    <section class="card" id="broadcastCard">
+      <h2 data-i18n="bcTitle">配信する</h2>
+      <div class="cols">
+        <div>
+          <label for="srcSource" data-i18n="srcSource">映像ソース</label>
+          <select id="srcSource">
+            <option value="camera" data-i18n="srcCamera">カメラ＋マイク</option>
+            <option value="screen" data-i18n="srcScreen">画面共有＋マイク</option>
+            <option value="audio" data-i18n="srcAudio">マイクのみ（音声配信）</option>
+          </select>
+        </div>
+        <div>
+          <label for="srcQuality" data-i18n="srcQuality">画質</label>
+          <select id="srcQuality">
+            <option value="1080p">1080p · 4.5 Mbps</option>
+            <option value="720p" selected>720p · 2.0 Mbps</option>
+            <option value="480p">480p · 900 kbps</option>
+            <option value="360p">360p · 450 kbps</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <button id="btnStart" type="button" data-i18n="btnStart">配信を開始</button>
+        <button id="btnStop" type="button" class="danger" disabled data-i18n="btnStop">配信を終了</button>
+        <span class="note" id="uplinkEstimate"></span>
+      </div>
+      <h3 data-i18n="preview">プレビュー</h3>
+      <video id="localVideo" autoplay playsinline muted></video>
+      <div id="bcInvitePanel"></div>
+    </section>
+
+    <section class="card" id="watchCard">
+      <h2 data-i18n="watchTitle">視聴する</h2>
+      <label for="joinInvite" data-i18n="joinInvite">招待コード（または招待リンクを開くと自動で入ります）</label>
+      <textarea id="joinInvite" class="code" placeholder="NG1.…"></textarea>
+      <div class="row">
+        <button id="btnJoin" type="button" data-i18n="btnJoin">応答コードを作る</button>
+        <span class="pill" id="watchState">—</span>
+      </div>
+      <label for="joinAnswer" data-i18n="joinAnswer">応答コード（これを配信者へ渡してください）</label>
+      <textarea id="joinAnswer" class="code" readonly></textarea>
+      <div class="row">
+        <button id="btnCopyAnswer" type="button" class="secondary" data-i18n="btnCopy">コピー</button>
+        <span class="note" data-i18n="joinNote">配信者が応答コードを貼ると、映像が流れ始めます。</span>
+      </div>
+      <h3 data-i18n="nowPlaying">視聴中</h3>
+      <video id="remoteVideo" autoplay playsinline controls></video>
+      <p class="warn hidden" id="playBlocked" data-i18n="playBlocked">ブラウザが自動再生を止めました。映像の再生ボタンを押してください。</p>
+      <div id="relayBox">
+        <h3 data-i18n="relayTitle">中継する（リレー）</h3>
+        <p class="note" data-i18n="relayNote">受信中の映像をそのまま再配信して、新しい視聴者を招けます。あなたが閉じると、あなた経由の視聴者は切断されます。</p>
+        <p class="note"><span data-i18n="relayDepth">現在の中継段数</span>: <b id="relayDepth">—</b></p>
+        <div id="relayInvitePanel"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2 data-i18n="chatTitle">チャット</h2>
+      <div id="chatLog" aria-live="polite"></div>
+      <div class="row">
+        <input type="text" id="chatInput" class="grow" maxlength="500">
+        <button id="btnChatSend" type="button" data-i18n="btnSend">送信</button>
+      </div>
+      <p class="note" data-i18n="chatNote">チャットは接続中の相手全員へ届きます。中継者は転送時にチャットを読めます（仕組み上の性質です）。</p>
+    </section>
+    <section class="card">
+      <h2 data-i18n="logTitle">接続ログ</h2>
+      <div id="eventLog"></div>
+      <p class="note" data-i18n="limitNote">正直な限界: ルームの自動発見はありません。双方が特殊な NAT の奥にいる場合は TURN がないと接続できません。詳しくは README と設計書をご覧ください。</p>
+    </section>
+  </div>
+</main>
+
+<script>
+'use strict';
+// === NAGARE CORE START ===
+(function (global) {
+  var CODE_PREFIX = 'NG';
+  var CODE_VERSION = 1;
+
+  // ---------- CRC32 (IEEE 802.3, polynomial 0xEDB88320) ----------
+  var crcTable = null;
+  function makeCrcTable() {
+    var table = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+    return table;
+  }
+  function crc32(bytes) {
+    if (!crcTable) crcTable = makeCrcTable();
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) {
+      crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    }
+    return ((crc ^ 0xFFFFFFFF) >>> 0);
+  }
+  function crc32Hex(bytes) {
+    var h = crc32(bytes).toString(16);
+    while (h.length < 8) h = '0' + h;
+    return h;
+  }
+
+  // ---------- base64url ----------
+  function bytesToBase64Url(bytes) {
+    var bin = '';
+    var CHUNK = 0x8000;
+    for (var i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function base64UrlToBytes(str) {
+    if (!/^[A-Za-z0-9\-_]+$/.test(str)) return null;
+    var b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) b64 += '=';
+    var bin;
+    try { bin = atob(b64); } catch (e) { return null; }
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  // ---------- compression (deflate-raw via CompressionStream) ----------
+  async function pump(bytes, transform) {
+    var stream = new Blob([bytes]).stream().pipeThrough(transform);
+    var buf = await new Response(stream).arrayBuffer();
+    return new Uint8Array(buf);
+  }
+  function deflateRaw(bytes) { return pump(bytes, new CompressionStream('deflate-raw')); }
+  function inflateRaw(bytes) { return pump(bytes, new DecompressionStream('deflate-raw')); }
+
+  // ---------- signal codec ----------
+  // Code format: NG<version>.<base64url(deflate-raw(JSON))>.<crc32hex>
+  async function encodeSignal(payload) {
+    var json = JSON.stringify(payload);
+    var raw = new TextEncoder().encode(json);
+    var compressed = await deflateRaw(raw);
+    return CODE_PREFIX + CODE_VERSION + '.' + bytesToBase64Url(compressed) + '.' + crc32Hex(compressed);
+  }
+
+  function fail(reason) { return { ok: false, reason: reason }; }
+
+  async function decodeSignal(code) {
+    if (typeof code !== 'string') return fail('code-format');
+    var cleaned = code.replace(/\s+/g, '');
+    // Accept a full link too: take the fragment payload after '#i=' if present.
+    var hashIdx = cleaned.indexOf('#i=');
+    if (hashIdx >= 0) cleaned = cleaned.slice(hashIdx + 3);
+    var parts = cleaned.split('.');
+    if (parts.length !== 3) return fail('code-format');
+    var head = parts[0];
+    if (head.slice(0, 2) !== CODE_PREFIX) return fail('code-format');
+    var version = parseInt(head.slice(2), 10);
+    if (version !== CODE_VERSION) return fail('code-version');
+    var compressed = base64UrlToBytes(parts[1]);
+    if (!compressed) return fail('code-format');
+    if (crc32Hex(compressed) !== parts[2].toLowerCase()) return fail('code-checksum');
+    var raw;
+    try { raw = await inflateRaw(compressed); } catch (e) { return fail('code-corrupt'); }
+    var payload;
+    try { payload = JSON.parse(new TextDecoder().decode(raw)); } catch (e) { return fail('code-corrupt'); }
+    var v = validateSignalPayload(payload);
+    if (!v.ok) return v;
+    return { ok: true, payload: payload };
+  }
+
+  function validateSignalPayload(p) {
+    if (!p || typeof p !== 'object') return fail('payload-invalid');
+    if (p.v !== CODE_VERSION) return fail('code-version');
+    if (p.kind !== 'offer' && p.kind !== 'answer') return fail('payload-invalid');
+    if (typeof p.sdp !== 'string' || p.sdp.length < 10) return fail('payload-invalid');
+    if (!Array.isArray(p.ice)) return fail('payload-invalid');
+    for (var i = 0; i < p.ice.length; i++) {
+      var c = p.ice[i];
+      if (!c || typeof c.candidate !== 'string') return fail('payload-invalid');
+    }
+    if (!p.meta || typeof p.meta !== 'object') return fail('payload-invalid');
+    if (p.meta.role !== 'origin' && p.meta.role !== 'relay') return fail('payload-invalid');
+    if (!Number.isInteger(p.meta.depth) || p.meta.depth < 0) return fail('payload-invalid');
+    if (typeof p.meta.name !== 'string') return fail('payload-invalid');
+    return { ok: true };
+  }
+
+  // ---------- session state machine ----------
+  var TRANSITIONS = {
+    'idle':          ['gathering', 'closed'],
+    'gathering':     ['awaiting-peer', 'failed', 'closed'],
+    'awaiting-peer': ['connecting', 'failed', 'closed'],
+    'connecting':    ['connected', 'failed', 'closed'],
+    'connected':     ['failed', 'closed'],
+    'failed':        ['closed'],
+    'closed':        []
+  };
+  function canTransition(from, to) {
+    var list = TRANSITIONS[from];
+    return !!list && list.indexOf(to) >= 0;
+  }
+  function createFSM(onChange) {
+    return {
+      state: 'idle',
+      reason: null,
+      transition: function (to, reason) {
+        if (!canTransition(this.state, to)) return false;
+        var from = this.state;
+        this.state = to;
+        if (to === 'failed') this.reason = reason || 'unknown';
+        if (onChange) onChange(from, to, this.reason);
+        return true;
+      }
+    };
+  }
+  var TIMEOUTS = { iceGatherMs: 5000, connectMs: 20000, disconnectGraceMs: 10000 };
+
+  // ---------- tree policy ----------
+  var TREE_DEFAULTS = { maxChildren: 3, maxDepth: 4 };
+  function canAddChild(activeChildren, maxChildren) { return activeChildren < maxChildren; }
+  function canHostDepth(childDepth, maxDepth) { return childDepth <= maxDepth; }
+  function maxViewers(fanout, depth) {
+    if (fanout <= 0 || depth <= 0) return 0;
+    if (fanout === 1) return depth;
+    var total = 0, level = 1;
+    for (var i = 0; i < depth; i++) { level *= fanout; total += level; }
+    return total;
+  }
+  // Estimated uplink including ~15% protocol overhead.
+  function estimateUplinkKbps(perStreamKbps, children) {
+    return Math.round(perStreamKbps * children * 1.15);
+  }
+  function computeSubtree(directChildren, childSubtrees) {
+    var total = directChildren;
+    for (var i = 0; i < childSubtrees.length; i++) {
+      var n = childSubtrees[i];
+      if (Number.isInteger(n) && n > 0) total += n;
+    }
+    return total;
+  }
+
+  // ---------- quality presets ----------
+  var QUALITY = {
+    '1080p': { width: 1920, height: 1080, frameRate: 30, videoKbps: 4500 },
+    '720p':  { width: 1280, height: 720,  frameRate: 30, videoKbps: 2000 },
+    '480p':  { width: 854,  height: 480,  frameRate: 30, videoKbps: 900 },
+    '360p':  { width: 640,  height: 360,  frameRate: 30, videoKbps: 450 },
+    'audio': { width: 0, height: 0, frameRate: 0, videoKbps: 0, audioKbps: 64 }
+  };
+
+  // ---------- data channel protocol ----------
+  var MAX_CHAT_LEN = 2000;
+  function msgChat(id, from, text, ts) {
+    return { type: 'chat', id: String(id), from: String(from || ''), text: String(text || ''), ts: ts || 0 };
+  }
+  function msgHello(name, depth) { return { type: 'hello', name: String(name || ''), depth: depth | 0 }; }
+  function msgState(subtree) { return { type: 'state', subtree: subtree | 0 }; }
+  function msgAudience(total) { return { type: 'audience', total: total | 0 }; }
+  function msgBye(reason) { return { type: 'bye', reason: String(reason || '') }; }
+
+  function isNonNegInt(n) { return Number.isInteger(n) && n >= 0; }
+  function parseMessage(data) {
+    var m;
+    try { m = JSON.parse(data); } catch (e) { return null; }
+    if (!m || typeof m !== 'object' || typeof m.type !== 'string') return null;
+    switch (m.type) {
+      case 'chat':
+        if (typeof m.id !== 'string' || m.id.length === 0) return null;
+        if (typeof m.from !== 'string') return null;
+        if (typeof m.text !== 'string' || m.text.length > MAX_CHAT_LEN) return null;
+        if (typeof m.ts !== 'number') return null;
+        return m;
+      case 'hello':
+        if (typeof m.name !== 'string' || !isNonNegInt(m.depth)) return null;
+        return m;
+      case 'state':
+        if (!isNonNegInt(m.subtree)) return null;
+        return m;
+      case 'audience':
+        if (!isNonNegInt(m.total)) return null;
+        return m;
+      case 'bye':
+        if (m.reason !== undefined && typeof m.reason !== 'string') return null;
+        return m;
+      default:
+        return null;
+    }
+  }
+
+  global.NagareCore = {
+    CODE_VERSION: CODE_VERSION,
+    crc32: crc32,
+    crc32Hex: crc32Hex,
+    bytesToBase64Url: bytesToBase64Url,
+    base64UrlToBytes: base64UrlToBytes,
+    encodeSignal: encodeSignal,
+    decodeSignal: decodeSignal,
+    validateSignalPayload: validateSignalPayload,
+    canTransition: canTransition,
+    createFSM: createFSM,
+    TIMEOUTS: TIMEOUTS,
+    TREE_DEFAULTS: TREE_DEFAULTS,
+    canAddChild: canAddChild,
+    canHostDepth: canHostDepth,
+    maxViewers: maxViewers,
+    estimateUplinkKbps: estimateUplinkKbps,
+    computeSubtree: computeSubtree,
+    QUALITY: QUALITY,
+    msgChat: msgChat,
+    msgHello: msgHello,
+    msgState: msgState,
+    msgAudience: msgAudience,
+    msgBye: msgBye,
+    parseMessage: parseMessage,
+    MAX_CHAT_LEN: MAX_CHAT_LEN
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
+// === NAGARE CORE END ===
+</script>
+<script>
+'use strict';
+(function () {
+  var core = window.NagareCore;
+  function $(id) { return document.getElementById(id); }
+
+  // ---------------- i18n ----------------
+  var I18N = {
+    ja: {
+      tagline: 'サーバーなしで届ける、ライブ配信',
+      stState: '状態', stViewers: '視聴者', stUp: '送信', stDown: '受信',
+      settings: '設定（名前・STUN/TURN・ツリー上限）',
+      setName: '表示名', setStun: 'STUN サーバー（1行に1つ）',
+      setNote: '設定はこの端末内にのみ保存されます。サーバーへは送信されません。',
+      setTurnUrl: 'TURN URL（任意・自分で用意したものだけ）', setTurnUser: 'TURN ユーザー名', setTurnPass: 'TURN パスワード',
+      setMaxChildren: '1人あたりの最大中継数', setMaxDepth: '中継の最大段数',
+      turnNote: 'TURN を使うと映像はその TURN サーバーを経由します（運営者には通信の存在が見えます）。Nagare 自体は TURN を用意しません。',
+      bcTitle: '配信する', srcSource: '映像ソース', srcCamera: 'カメラ＋マイク', srcScreen: '画面共有＋マイク', srcAudio: 'マイクのみ（音声配信）',
+      srcQuality: '画質', btnStart: '配信を開始', btnStop: '配信を終了', preview: 'プレビュー',
+      watchTitle: '視聴する', joinInvite: '招待コード（または招待リンクを開くと自動で入ります）',
+      btnJoin: '応答コードを作る', joinAnswer: '応答コード（これを配信者へ渡してください）', btnCopy: 'コピー',
+      joinNote: '配信者が応答コードを貼ると、映像が流れ始めます。', nowPlaying: '視聴中',
+      playBlocked: 'ブラウザが自動再生を止めました。映像の再生ボタンを押してください。',
+      relayTitle: '中継する（リレー）', relayNote: '受信中の映像をそのまま再配信して、新しい視聴者を招けます。あなたが閉じると、あなた経由の視聴者は切断されます。',
+      relayDepth: '現在の中継段数',
+      chatTitle: 'チャット', btnSend: '送信',
+      chatNote: 'チャットは接続中の相手全員へ届きます。中継者は転送時にチャットを読めます（仕組み上の性質です）。',
+      logTitle: '接続ログ',
+      limitNote: '正直な限界: ルームの自動発見はありません。双方が特殊な NAT の奥にいる場合は TURN がないと接続できません。詳しくは README と設計書をご覧ください。',
+      inviteTitle: '招待', btnCreateInvite: '招待コードを作る', inviteCode: '招待コード（これを視聴者へ渡してください）',
+      inviteLink: '招待リンクをコピー', answerLabel: '応答コード（視聴者から受け取ったものを貼ってください）',
+      btnAccept: '接続する', attempts: '試行',
+      stateIdle: '待機中', stateBroadcasting: '配信中', stateWatching: '視聴中', stateConnecting: '接続中',
+      copied: 'コピーしました', bcStarted: '配信を開始しました。招待コードを作って視聴者へ渡してください。',
+      bcStopped: '配信を終了しました。', joined: '応答コードを作りました。配信者へ渡してください。',
+      connectedPeer: '接続しました', inviteFromLink: '招待リンクから招待コードを読み込みました。',
+      chatNoPeers: '接続中の相手がいないため、チャットを送れませんでした。',
+      micSkipped: 'マイクを取得できなかったため、画面のみで配信します。',
+      defaultName: 'ゲスト', childrenUnit: '人がこの端末経由で視聴中',
+      uplinkNow: '推定の送信帯域', peerLeftNote: '相手が切断しました',
+      upstreamLostNote: '配信元との接続が切れたため、中継も終了しました。'
+    },
+    en: {
+      tagline: 'Live streaming with no server at all',
+      stState: 'State', stViewers: 'Viewers', stUp: 'Up', stDown: 'Down',
+      settings: 'Settings (name, STUN/TURN, tree limits)',
+      setName: 'Display name', setStun: 'STUN servers (one per line)',
+      setNote: 'Settings are stored only on this device. Nothing is sent to a server.',
+      setTurnUrl: 'TURN URL (optional, bring your own)', setTurnUser: 'TURN username', setTurnPass: 'TURN password',
+      setMaxChildren: 'Max relays per person', setMaxDepth: 'Max relay depth',
+      turnNote: 'With TURN, media passes through that TURN server (its operator can see that traffic exists). Nagare itself provides no TURN.',
+      bcTitle: 'Broadcast', srcSource: 'Source', srcCamera: 'Camera + microphone', srcScreen: 'Screen share + microphone', srcAudio: 'Microphone only (audio)',
+      srcQuality: 'Quality', btnStart: 'Start broadcasting', btnStop: 'Stop', preview: 'Preview',
+      watchTitle: 'Watch', joinInvite: 'Invite code (or open an invite link to fill this automatically)',
+      btnJoin: 'Create answer code', joinAnswer: 'Answer code (give this to the broadcaster)', btnCopy: 'Copy',
+      joinNote: 'Once the broadcaster pastes your answer code, the stream starts.', nowPlaying: 'Now playing',
+      playBlocked: 'The browser blocked autoplay. Press play on the video.',
+      relayTitle: 'Relay this stream', relayNote: 'Re-stream what you are receiving and invite new viewers. If you close this page, viewers behind you are disconnected.',
+      relayDepth: 'Your relay depth',
+      chatTitle: 'Chat', btnSend: 'Send',
+      chatNote: 'Chat reaches everyone connected. Relay nodes can read chat while forwarding it (inherent to relaying).',
+      logTitle: 'Connection log',
+      limitNote: 'Honest limits: there is no room discovery. Some NAT combinations cannot connect without TURN. See the README and design doc.',
+      inviteTitle: 'Invites', btnCreateInvite: 'Create invite code', inviteCode: 'Invite code (give this to a viewer)',
+      inviteLink: 'Copy invite link', answerLabel: 'Answer code (paste the one you received)',
+      btnAccept: 'Connect', attempts: 'Attempts',
+      stateIdle: 'Idle', stateBroadcasting: 'Broadcasting', stateWatching: 'Watching', stateConnecting: 'Connecting',
+      copied: 'Copied', bcStarted: 'Broadcasting started. Create an invite code and give it to a viewer.',
+      bcStopped: 'Broadcast stopped.', joined: 'Answer code created. Give it to the broadcaster.',
+      connectedPeer: 'Connected', inviteFromLink: 'Invite code loaded from the invite link.',
+      chatNoPeers: 'No peer is connected, so the chat message was not sent.',
+      micSkipped: 'Microphone unavailable; streaming screen only.',
+      defaultName: 'Guest', childrenUnit: 'viewing through this device',
+      uplinkNow: 'Estimated uplink', peerLeftNote: 'Peer disconnected',
+      upstreamLostNote: 'The upstream connection was lost, so relaying has ended.'
+    }
+  };
+  var REASONS = {
+    ja: {
+      'media-denied': 'カメラ／マイクの許可が拒否されました', 'media-unavailable': '使えるカメラ／マイクが見つかりません',
+      'no-ice-candidates': '接続候補（ICE）を1つも集められませんでした。ネットワークを確認してください',
+      'connect-timeout': '接続がタイムアウトしました（20秒）。相手のネットワークとの相性が悪い可能性があります',
+      'ice-failed': '接続を確立できませんでした。双方の NAT の組み合わせによっては TURN が必要です',
+      'peer-lost': '相手との接続が切れました', 'peer-left': '相手が切断しました',
+      'upstream-lost': '配信元との接続が切れました', 'dc-closed': 'データチャネルが閉じられました',
+      'code-format': 'コードの形式が違います。全体をそのまま貼ってください',
+      'code-version': 'コードの版が対応していません', 'code-checksum': 'コードが壊れています（チェック値が一致しません）。コピーし直してください',
+      'code-corrupt': 'コードを読み解けませんでした', 'payload-invalid': 'コードの中身が正しくありません',
+      'kind-mismatch': 'コードの種類が違います（招待と応答を取り違えています）',
+      'children-limit': '中継数の上限に達しています', 'depth-limit': '中継段数の上限に達しています',
+      'no-source': '配信する映像がまだありません', 'no-pending': '先に招待コードを作ってください',
+      'already-joined': 'すでに参加手続き中です', 'unknown': '不明なエラー'
+    },
+    en: {
+      'media-denied': 'Camera/microphone permission was denied', 'media-unavailable': 'No usable camera/microphone found',
+      'no-ice-candidates': 'No ICE candidates could be gathered. Check your network',
+      'connect-timeout': 'Connection timed out (20s). The two networks may be incompatible',
+      'ice-failed': 'Could not establish a connection. Some NAT combinations require TURN',
+      'peer-lost': 'Connection to the peer was lost', 'peer-left': 'The peer disconnected',
+      'upstream-lost': 'The upstream connection was lost', 'dc-closed': 'The data channel was closed',
+      'code-format': 'The code format is wrong. Paste the whole code',
+      'code-version': 'Unsupported code version', 'code-checksum': 'The code is damaged (checksum mismatch). Copy it again',
+      'code-corrupt': 'The code could not be decoded', 'payload-invalid': 'The code contents are invalid',
+      'kind-mismatch': 'Wrong kind of code (invite and answer are swapped)',
+      'children-limit': 'Relay limit reached', 'depth-limit': 'Relay depth limit reached',
+      'no-source': 'There is no stream to send yet', 'no-pending': 'Create an invite code first',
+      'already-joined': 'Already joining', 'unknown': 'Unknown error'
+    }
+  };
+  var lang = localStorage.getItem('nagare.lang') || 'ja';
+  function t(key) { return (I18N[lang] && I18N[lang][key]) || I18N.ja[key] || key; }
+  function reasonText(r) {
+    var d = REASONS[lang] || REASONS.ja;
+    return d[r] || REASONS.ja[r] || r || d['unknown'];
+  }
+
+  // ---------------- settings ----------------
+  var DEF_STUN = 'stun:stun.l.google.com:19302\nstun:stun1.l.google.com:19302';
+  var settings = {
+    name: '', stun: DEF_STUN, turnUrl: '', turnUser: '', turnPass: '',
+    maxChildren: core.TREE_DEFAULTS.maxChildren, maxDepth: core.TREE_DEFAULTS.maxDepth
+  };
+  try {
+    var saved = JSON.parse(localStorage.getItem('nagare.settings') || 'null');
+    if (saved) for (var k in settings) if (saved[k] !== undefined) settings[k] = saved[k];
+  } catch (e) { /* ignore */ }
+  function saveSettings() { try { localStorage.setItem('nagare.settings', JSON.stringify(settings)); } catch (e) { /* ignore */ } }
+  function bindSettings() {
+    $('setName').value = settings.name;
+    $('setStun').value = settings.stun;
+    $('setTurnUrl').value = settings.turnUrl;
+    $('setTurnUser').value = settings.turnUser;
+    $('setTurnPass').value = settings.turnPass;
+    $('setMaxChildren').value = settings.maxChildren;
+    $('setMaxDepth').value = settings.maxDepth;
+    var on = function () {
+      settings.name = $('setName').value.trim();
+      settings.stun = $('setStun').value;
+      settings.turnUrl = $('setTurnUrl').value.trim();
+      settings.turnUser = $('setTurnUser').value;
+      settings.turnPass = $('setTurnPass').value;
+      settings.maxChildren = Math.min(6, Math.max(1, parseInt($('setMaxChildren').value, 10) || core.TREE_DEFAULTS.maxChildren));
+      settings.maxDepth = Math.min(8, Math.max(1, parseInt($('setMaxDepth').value, 10) || core.TREE_DEFAULTS.maxDepth));
+      saveSettings(); updateUplinkEstimate();
+    };
+    ['setName', 'setStun', 'setTurnUrl', 'setTurnUser', 'setTurnPass', 'setMaxChildren', 'setMaxDepth']
+      .forEach(function (id) { $(id).addEventListener('input', on); });
+  }
+  function myName() { return settings.name || t('defaultName'); }
+  function iceConfig() {
+    var servers = [];
+    settings.stun.split(/\n/).map(function (s) { return s.trim(); }).filter(Boolean)
+      .forEach(function (u) { servers.push({ urls: u }); });
+    if (settings.turnUrl) {
+      var turn = { urls: settings.turnUrl };
+      if (settings.turnUser) turn.username = settings.turnUser;
+      if (settings.turnPass) turn.credential = settings.turnPass;
+      servers.push(turn);
+    }
+    return { iceServers: servers };
+  }
+
+  // ---------------- logging / status ----------------
+  function logEvent(text, cls) {
+    var div = document.createElement('div');
+    if (cls) div.className = cls;
+    var time = new Date().toLocaleTimeString();
+    div.textContent = '[' + time + '] ' + text;
+    var log = $('eventLog');
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+  var lastError = '';
+  function showError(reason) {
+    lastError = reason ? reasonText(reason) : '';
+    $('statusError').textContent = lastError;
+    if (reason) logEvent(lastError, 'err');
+  }
+
+  // ---------------- sessions ----------------
+  var sessionSeq = 0;
+  var downstream = new Map();
+  var upstream = null;
+  var localStream = null;
+  var remoteStream = null;
+  var broadcasting = false;
+  var myDepth = 0;
+  var audienceTotal = null;
+  var chatLogData = [];
+  var seenChat = new Set();
+  var chatSeq = 0;
+
+  function allSessions() {
+    var list = [];
+    downstream.forEach(function (s) { list.push(s); });
+    if (upstream) list.push(upstream);
+    return list;
+  }
+  function activeDownstreamCount() {
+    var n = 0;
+    downstream.forEach(function (s) {
+      if (s.fsm.state === 'gathering' || s.fsm.state === 'awaiting-peer' ||
+          s.fsm.state === 'connecting' || s.fsm.state === 'connected') n++;
+    });
+    return n;
+  }
+  function makeSession(dir) {
+    var s = {
+      id: ++sessionSeq, dir: dir, pc: null, dc: null,
+      candidates: [], candSet: new Set(), subtree: 0,
+      peerName: '', peerDepth: 0, panel: null,
+      connectTimer: null, graceTimer: null, prevStats: null, kbpsUp: 0, kbpsDown: 0,
+      fsm: null
+    };
+    s.fsm = core.createFSM(function () { refreshAll(); });
+    return s;
+  }
+  function waitIceGathering(pc, ms) {
+    if (pc.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise(function (resolve) {
+      var done = false;
+      function finish() { if (!done) { done = true; resolve(); } }
+      pc.addEventListener('icegatheringstatechange', function () {
+        if (pc.iceGatheringState === 'complete') finish();
+      });
+      setTimeout(finish, ms);
+    });
+  }
+  function collectCandidates(session) {
+    session.pc.onicecandidate = function (e) {
+      if (e.candidate && e.candidate.candidate) {
+        var key = e.candidate.candidate;
+        if (!session.candSet.has(key)) {
+          session.candSet.add(key);
+          session.candidates.push({
+            candidate: key,
+            sdpMid: e.candidate.sdpMid,
+            sdpMLineIndex: e.candidate.sdpMLineIndex
+          });
+        }
+      }
+    };
+  }
+  function applyRemoteIce(session, ice) {
+    var chain = Promise.resolve();
+    (ice || []).forEach(function (c) {
+      chain = chain.then(function () {
+        return session.pc.addIceCandidate(new RTCIceCandidate(c)).catch(function () { /* duplicate or unusable */ });
+      });
+    });
+    return chain;
+  }
+  function startConnectTimer(session) {
+    clearTimeout(session.connectTimer);
+    session.connectTimer = setTimeout(function () {
+      if (session.fsm.state === 'connecting') failSession(session, 'connect-timeout');
+    }, core.TIMEOUTS.connectMs);
+  }
+  function wirePc(session) {
+    var pc = session.pc;
+    pc.oniceconnectionstatechange = function () {
+      var st = pc.iceConnectionState;
+      if (st === 'failed') failSession(session, 'ice-failed');
+      else if (st === 'disconnected') {
+        clearTimeout(session.graceTimer);
+        session.graceTimer = setTimeout(function () {
+          if (session.fsm.state === 'connected' || session.fsm.state === 'connecting') failSession(session, 'peer-lost');
+        }, core.TIMEOUTS.disconnectGraceMs);
+      } else if (st === 'connected' || st === 'completed') {
+        clearTimeout(session.graceTimer);
+      } else if (st === 'closed') {
+        closeSession(session);
+      }
+    };
+    pc.onconnectionstatechange = function () {
+      if (pc.connectionState === 'failed') failSession(session, 'ice-failed');
+    };
+  }
+  function applyBitrateCap(session) {
+    var preset = core.QUALITY[$('srcQuality').value] || core.QUALITY['720p'];
+    if (!preset.videoKbps) return;
+    session.pc.getSenders().forEach(function (sender) {
+      if (sender.track && sender.track.kind === 'video') {
+        var params = sender.getParameters() || {};
+        if (!params.encodings || params.encodings.length === 0) params.encodings = [{}];
+        params.encodings[0].maxBitrate = preset.videoKbps * 1000;
+        params.encodings[0].maxFramerate = preset.frameRate;
+        sender.setParameters(params).catch(function () { /* unsupported combination */ });
+      }
+    });
+  }
+  function setupDc(session, dc) {
+    session.dc = dc;
+    dc.onopen = function () {
+      clearTimeout(session.connectTimer);
+      session.fsm.transition('connected');
+      logEvent(t('connectedPeer') + ' (#' + session.id + ')');
+      try { dc.send(JSON.stringify(core.msgHello(myName(), myDepth))); } catch (e) { /* ignore */ }
+      if (session.dir === 'down') { applyBitrateCap(session); propagateCounts(); }
+      if (session.dir === 'up') propagateCounts();
+    };
+    dc.onmessage = function (ev) { handleMessage(session, ev.data); };
+    dc.onclose = function () {
+      if (session.fsm.state === 'connected') {
+        failSession(session, session.dir === 'up' ? 'upstream-lost' : 'dc-closed');
+      }
+    };
+  }
+  function broadcastDc(obj, except) {
+    var raw = JSON.stringify(obj);
+    var n = 0;
+    allSessions().forEach(function (s) {
+      if (s !== except && s.dc && s.dc.readyState === 'open') {
+        try { s.dc.send(raw); n++; } catch (e) { /* ignore */ }
+      }
+    });
+    return n;
+  }
+  function handleMessage(session, data) {
+    var m = core.parseMessage(data);
+    if (!m) return;
+    if (m.type === 'chat') {
+      if (seenChat.has(m.id)) return;
+      seenChat.add(m.id);
+      appendChat(m, false);
+      broadcastDc(m, session);
+    } else if (m.type === 'hello') {
+      session.peerName = m.name; session.peerDepth = m.depth;
+      refreshAll();
+    } else if (m.type === 'state') {
+      if (session.dir === 'down') { session.subtree = m.subtree; propagateCounts(); }
+    } else if (m.type === 'audience') {
+      audienceTotal = m.total;
+      broadcastDc(m, session);
+      refreshAll();
+    } else if (m.type === 'bye') {
+      if (session.dir === 'up') {
+        failSession(session, m.reason || 'peer-left');
+      } else {
+        logEvent(t('peerLeftNote') + ' (#' + session.id + ')');
+        closeSession(session);
+        propagateCounts();
+      }
+    }
+  }
+  function mySubtree() {
+    var direct = 0, subs = [];
+    downstream.forEach(function (s) {
+      if (s.fsm.state === 'connected') { direct++; subs.push(s.subtree); }
+    });
+    return core.computeSubtree(direct, subs);
+  }
+  function propagateCounts() {
+    var mine = mySubtree();
+    if (upstream && upstream.dc && upstream.dc.readyState === 'open') {
+      try { upstream.dc.send(JSON.stringify(core.msgState(mine))); } catch (e) { /* ignore */ }
+    }
+    if (!upstream) {
+      audienceTotal = mine;
+      broadcastDc(core.msgAudience(mine), null);
+    }
+    refreshAll();
+  }
+  function failSession(session, reason) {
+    var moved = session.fsm.transition('failed', reason);
+    if (!moved) return;
+    clearTimeout(session.connectTimer); clearTimeout(session.graceTimer);
+    showError(reason);
+    if (session.dir === 'up') {
+      // Upstream is gone: the whole subtree below us ends too.
+      logEvent(t('upstreamLostNote'), 'err');
+      var bye = core.msgBye('upstream-lost');
+      downstream.forEach(function (s) {
+        if (s.dc && s.dc.readyState === 'open') { try { s.dc.send(JSON.stringify(bye)); } catch (e) { /* ignore */ } }
+      });
+      var toClose = [];
+      downstream.forEach(function (s) { toClose.push(s); });
+      toClose.forEach(function (s) { closeSession(s); });
+      if (remoteStream) { remoteStream.getTracks().forEach(function (tr) { tr.stop(); }); remoteStream = null; }
+      $('remoteVideo').srcObject = null;
+      audienceTotal = null;
+    }
+    refreshAll();
+  }
+  function closeSession(session) {
+    clearTimeout(session.connectTimer); clearTimeout(session.graceTimer);
+    try { if (session.dc) session.dc.close(); } catch (e) { /* ignore */ }
+    try { if (session.pc) session.pc.close(); } catch (e) { /* ignore */ }
+    session.fsm.transition('closed');
+    if (session.dir === 'down') downstream.delete(session.id);
+    if (session.dir === 'up' && upstream === session) upstream = null;
+    if (session.panel && session.panel.pending === session) session.panel.pending = null;
+    refreshAll();
+  }
+  function sendByeAll(reason) {
+    broadcastDc(core.msgBye(reason || 'peer-left'), null);
+  }
+
+  // ---------------- invite panels (downstream session factory) ----------------
+  function InvitePanel(container, opts) {
+    container.innerHTML = '';
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<h3></h3>' +
+      '<div class="row"><button type="button" class="btn-create"></button>' +
+      '<span class="pill panel-state">—</span><span class="note attempts"></span></div>' +
+      '<label class="lbl-invite"></label><textarea class="code invite-out" readonly></textarea>' +
+      '<div class="row"><button type="button" class="secondary btn-copy-code"></button>' +
+      '<button type="button" class="secondary btn-copy-link"></button></div>' +
+      '<label class="lbl-answer"></label><textarea class="code answer-in"></textarea>' +
+      '<div class="row"><button type="button" class="btn-accept"></button></div>' +
+      '<div class="session-list"></div>';
+    container.appendChild(wrap);
+    var panel = {
+      el: wrap, pending: null, attempts: 0,
+      role: opts.role, getStream: opts.getStream, getDepth: opts.getDepth,
+      sessions: []
+    };
+    function q(cls) { return wrap.querySelector('.' + cls); }
+    panel.renderTexts = function () {
+      q('btn-create').textContent = t('btnCreateInvite');
+      wrap.querySelector('h3').textContent = t('inviteTitle');
+      q('lbl-invite').textContent = t('inviteCode');
+      q('btn-copy-code').textContent = t('btnCopy');
+      q('btn-copy-link').textContent = t('inviteLink');
+      q('lbl-answer').textContent = t('answerLabel');
+      q('btn-accept').textContent = t('btnAccept');
+      panel.renderSessions();
+    };
+    panel.renderSessions = function () {
+      q('attempts').textContent = panel.attempts > 0 ? (t('attempts') + ': ' + panel.attempts) : '';
+      var stateEl = q('panel-state');
+      if (panel.pending) {
+        stateEl.textContent = panel.pending.fsm.state;
+        stateEl.className = 'pill panel-state';
+      } else {
+        var connected = panel.sessions.filter(function (s) { return s.fsm.state === 'connected'; }).length;
+        stateEl.textContent = connected > 0 ? 'connected × ' + connected : '—';
+        stateEl.className = 'pill panel-state' + (connected > 0 ? ' connected' : '');
+      }
+      var list = q('session-list');
+      list.innerHTML = '';
+      panel.sessions.forEach(function (s) {
+        if (s.fsm.state === 'closed') return;
+        var row = document.createElement('div');
+        row.className = 'child';
+        var left = document.createElement('span');
+        left.textContent = '#' + s.id + ' ' + (s.peerName || '—');
+        var right = document.createElement('span');
+        var label = s.fsm.state + (s.fsm.state === 'failed' ? ' (' + reasonText(s.fsm.reason) + ')' : '');
+        right.textContent = label + (s.fsm.state === 'connected' ? ' · ' + (s.subtree + 1) + ' ' + t('childrenUnit') : '');
+        row.appendChild(left); row.appendChild(right);
+        list.appendChild(row);
+      });
+    };
+    q('btn-create').addEventListener('click', function () { panelCreate(panel); });
+    q('btn-accept').addEventListener('click', function () { panelAccept(panel, q('answer-in').value); });
+    q('btn-copy-code').addEventListener('click', function () { copyText(q('invite-out').value); });
+    q('btn-copy-link').addEventListener('click', function () {
+      var code = q('invite-out').value;
+      if (code) copyText(location.href.split('#')[0] + '#i=' + code);
+    });
+    panel.setInvite = function (code) { q('invite-out').value = code; };
+    panel.clearAnswer = function () { q('answer-in').value = ''; };
+    panel.renderTexts();
+    return panel;
+  }
+  function err(reason) { var e = new Error(reason); e.reason = reason; return e; }
+
+  async function panelCreate(panel) {
+    try {
+      var src = panel.getStream();
+      if (!src) throw err('no-source');
+      if (!core.canAddChild(activeDownstreamCount(), settings.maxChildren)) throw err('children-limit');
+      var childDepth = panel.getDepth() + 1;
+      if (!core.canHostDepth(childDepth, settings.maxDepth)) throw err('depth-limit');
+      var session = makeSession('down');
+      session.panel = panel;
+      panel.sessions.push(session);
+      downstream.set(session.id, session);
+      session.fsm.transition('gathering');
+      var pc = new RTCPeerConnection(iceConfig());
+      session.pc = pc;
+      src.getTracks().forEach(function (tr) { pc.addTrack(tr, src); });
+      var dc = pc.createDataChannel('nagare');
+      setupDc(session, dc);
+      collectCandidates(session);
+      wirePc(session);
+      var offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      await waitIceGathering(pc, core.TIMEOUTS.iceGatherMs);
+      if (session.candidates.length === 0) { failSession(session, 'no-ice-candidates'); throw err('no-ice-candidates'); }
+      var payload = {
+        v: core.CODE_VERSION, kind: 'offer', sdp: pc.localDescription.sdp, ice: session.candidates,
+        meta: { role: panel.role, depth: childDepth, name: myName(), createdAt: Date.now() }
+      };
+      var code = await core.encodeSignal(payload);
+      session.fsm.transition('awaiting-peer');
+      panel.pending = session;
+      panel.attempts++;
+      panel.setInvite(code);
+      refreshAll();
+      return code;
+    } catch (e) {
+      showError(e.reason || 'unknown');
+      throw e;
+    }
+  }
+  async function panelAccept(panel, codeStr) {
+    try {
+      var session = panel.pending;
+      if (!session) throw err('no-pending');
+      var dec = await core.decodeSignal(codeStr);
+      if (!dec.ok) throw err(dec.reason);
+      if (dec.payload.kind !== 'answer') throw err('kind-mismatch');
+      session.fsm.transition('connecting');
+      startConnectTimer(session);
+      await session.pc.setRemoteDescription({ type: 'answer', sdp: dec.payload.sdp });
+      await applyRemoteIce(session, dec.payload.ice);
+      panel.pending = null;
+      panel.clearAnswer();
+      refreshAll();
+    } catch (e) {
+      showError(e.reason || 'unknown');
+      throw e;
+    }
+  }
+
+  // ---------------- broadcast ----------------
+  function mediaReason(e) {
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) return 'media-denied';
+    return 'media-unavailable';
+  }
+  async function startBroadcast(opts) {
+    opts = opts || {};
+    if (opts.source) $('srcSource').value = opts.source;
+    if (opts.quality) $('srcQuality').value = opts.quality;
+    var source = $('srcSource').value;
+    var preset = core.QUALITY[$('srcQuality').value] || core.QUALITY['720p'];
+    try {
+      var stream;
+      if (source === 'camera') {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: preset.width }, height: { ideal: preset.height }, frameRate: { ideal: preset.frameRate } },
+          audio: true
+        });
+      } else if (source === 'audio') {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      } else {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+        try {
+          var mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+          mic.getAudioTracks().forEach(function (tr) { stream.addTrack(tr); });
+        } catch (e) { logEvent(t('micSkipped')); }
+      }
+      localStream = stream;
+      var lv = $('localVideo');
+      lv.srcObject = stream;
+      lv.classList.toggle('audioonly', source === 'audio');
+      broadcasting = true;
+      myDepth = 0;
+      $('btnStart').disabled = true;
+      $('btnStop').disabled = false;
+      $('srcSource').disabled = true;
+      $('srcQuality').disabled = true;
+      logEvent(t('bcStarted'));
+      refreshAll();
+    } catch (e) {
+      showError(mediaReason(e));
+      throw e;
+    }
+  }
+  function stopBroadcast() {
+    sendByeAll('peer-left');
+    var list = [];
+    downstream.forEach(function (s) { list.push(s); });
+    list.forEach(function (s) { closeSession(s); });
+    if (localStream) { localStream.getTracks().forEach(function (tr) { tr.stop(); }); localStream = null; }
+    $('localVideo').srcObject = null;
+    broadcasting = false;
+    $('btnStart').disabled = false;
+    $('btnStop').disabled = true;
+    $('srcSource').disabled = false;
+    $('srcQuality').disabled = false;
+    logEvent(t('bcStopped'));
+    refreshAll();
+  }
+
+  // ---------------- watch / join ----------------
+  async function doJoin(inviteStr) {
+    try {
+      if (upstream) {
+        if (upstream.fsm.state === 'failed' || upstream.fsm.state === 'closed') { closeSession(upstream); }
+        else throw err('already-joined');
+      }
+      var dec = await core.decodeSignal(inviteStr);
+      if (!dec.ok) throw err(dec.reason);
+      if (dec.payload.kind !== 'offer') throw err('kind-mismatch');
+      var session = makeSession('up');
+      upstream = session;
+      myDepth = dec.payload.meta.depth;
+      session.peerName = dec.payload.meta.name;
+      session.fsm.transition('gathering');
+      var pc = new RTCPeerConnection(iceConfig());
+      session.pc = pc;
+      remoteStream = new MediaStream();
+      var rv = $('remoteVideo');
+      rv.srcObject = remoteStream;
+      pc.ontrack = function (e) {
+        if (remoteStream && remoteStream.getTracks().indexOf(e.track) < 0) remoteStream.addTrack(e.track);
+        rv.play().then(function () { $('playBlocked').classList.add('hidden'); })
+          .catch(function () { $('playBlocked').classList.remove('hidden'); });
+      };
+      pc.ondatachannel = function (e) { setupDc(session, e.channel); };
+      collectCandidates(session);
+      wirePc(session);
+      await pc.setRemoteDescription({ type: 'offer', sdp: dec.payload.sdp });
+      await applyRemoteIce(session, dec.payload.ice);
+      var answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitIceGathering(pc, core.TIMEOUTS.iceGatherMs);
+      if (session.candidates.length === 0) { failSession(session, 'no-ice-candidates'); throw err('no-ice-candidates'); }
+      var payload = {
+        v: core.CODE_VERSION, kind: 'answer', sdp: pc.localDescription.sdp, ice: session.candidates,
+        meta: { role: myDepth === 0 ? 'origin' : 'relay', depth: myDepth, name: myName(), createdAt: Date.now() }
+      };
+      var code = await core.encodeSignal(payload);
+      session.fsm.transition('awaiting-peer');
+      session.fsm.transition('connecting');
+      startConnectTimer(session);
+      $('joinAnswer').value = code;
+      logEvent(t('joined'));
+      refreshAll();
+      return code;
+    } catch (e) {
+      showError(e.reason || 'unknown');
+      throw e;
+    }
+  }
+  function leaveStream() {
+    if (upstream) {
+      if (upstream.dc && upstream.dc.readyState === 'open') {
+        try { upstream.dc.send(JSON.stringify(core.msgBye('peer-left'))); } catch (e) { /* ignore */ }
+      }
+      closeSession(upstream);
+    }
+    var list = [];
+    downstream.forEach(function (s) { list.push(s); });
+    list.forEach(function (s) {
+      if (s.dc && s.dc.readyState === 'open') { try { s.dc.send(JSON.stringify(core.msgBye('upstream-lost'))); } catch (e) { /* ignore */ } }
+      closeSession(s);
+    });
+    if (remoteStream) { remoteStream.getTracks().forEach(function (tr) { tr.stop(); }); remoteStream = null; }
+    $('remoteVideo').srcObject = null;
+    audienceTotal = null;
+    refreshAll();
+  }
+
+  // ---------------- chat ----------------
+  function appendChat(m, mine) {
+    chatLogData.push({ from: m.from, text: m.text, ts: m.ts, me: !!mine });
+    var div = document.createElement('div');
+    var name = document.createElement('b');
+    name.textContent = m.from + ': ';
+    if (mine) div.className = 'me';
+    div.appendChild(name);
+    div.appendChild(document.createTextNode(m.text));
+    var log = $('chatLog');
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+  function doSendChat(text) {
+    text = (text || '').trim();
+    if (!text) return false;
+    var msg = core.msgChat(
+      'm' + Date.now().toString(36) + '-' + (++chatSeq) + '-' + Math.random().toString(36).slice(2, 8),
+      myName(), text, Date.now());
+    seenChat.add(msg.id);
+    appendChat(msg, true);
+    var sent = broadcastDc(msg, null);
+    if (sent === 0) logEvent(t('chatNoPeers'), 'err');
+    return sent > 0;
+  }
+
+  // ---------------- clipboard ----------------
+  function copyText(text) {
+    if (!text) return;
+    function done() { logEvent(t('copied')); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { fallback(); });
+    } else fallback();
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+      document.body.removeChild(ta);
+    }
+  }
+
+  // ---------------- status / stats ----------------
+  function updateUplinkEstimate() {
+    var preset = core.QUALITY[$('srcQuality').value] || core.QUALITY['720p'];
+    var kbps = core.estimateUplinkKbps(preset.videoKbps, Math.max(1, activeDownstreamCount()));
+    $('uplinkEstimate').textContent = broadcasting || true ? (t('uplinkNow') + ': ~' + kbps + ' kbps') : '';
+  }
+  function refreshAll() {
+    // overall state
+    var stateText = t('stateIdle');
+    if (broadcasting) stateText = t('stateBroadcasting');
+    else if (upstream && upstream.fsm.state === 'connected') stateText = t('stateWatching');
+    else if (upstream) stateText = t('stateConnecting');
+    $('statusState').textContent = stateText;
+    var viewers = audienceTotal !== null ? audienceTotal : mySubtree();
+    $('statusViewers').textContent = viewers;
+    // watch pill
+    var pill = $('watchState');
+    if (upstream) {
+      pill.textContent = upstream.fsm.state + (upstream.fsm.state === 'failed' ? ' (' + reasonText(upstream.fsm.reason) + ')' : '');
+      pill.className = 'pill' + (upstream.fsm.state === 'connected' ? ' connected' : upstream.fsm.state === 'failed' ? ' failed' : '');
+    } else { pill.textContent = '—'; pill.className = 'pill'; }
+    $('relayDepth').textContent = upstream ? String(myDepth) : '—';
+    if (bcPanel) bcPanel.renderSessions();
+    if (relayPanel) relayPanel.renderSessions();
+    updateUplinkEstimate();
+  }
+  async function statsTick() {
+    var up = 0, down = 0;
+    var sessions = allSessions();
+    for (var i = 0; i < sessions.length; i++) {
+      var s = sessions[i];
+      if (!s.pc || (s.fsm.state !== 'connected' && s.fsm.state !== 'connecting')) continue;
+      try {
+        var report = await s.pc.getStats();
+        var sent = 0, recv = 0;
+        report.forEach(function (r) {
+          var kind = r.kind || r.mediaType;
+          if (r.type === 'outbound-rtp' && (kind === 'video' || kind === 'audio')) sent += r.bytesSent || 0;
+          if (r.type === 'inbound-rtp' && (kind === 'video' || kind === 'audio')) recv += r.bytesReceived || 0;
+        });
+        var now = performance.now();
+        if (s.prevStats) {
+          var dt = (now - s.prevStats.ts) / 1000;
+          if (dt > 0) {
+            s.kbpsUp = Math.round(((sent - s.prevStats.sent) * 8) / dt / 1000);
+            s.kbpsDown = Math.round(((recv - s.prevStats.recv) * 8) / dt / 1000);
+          }
+        }
+        s.prevStats = { ts: now, sent: sent, recv: recv };
+        up += s.kbpsUp; down += s.kbpsDown;
+      } catch (e) { /* stats are best-effort */ }
+    }
+    $('statusUp').textContent = up + ' kbps';
+    $('statusDown').textContent = down + ' kbps';
+    if (upstream && upstream.fsm.state === 'connected') propagateCounts();
+  }
+
+  // ---------------- panels & wiring ----------------
+  var bcPanel = InvitePanel($('bcInvitePanel'), {
+    role: 'origin',
+    getStream: function () { return localStream; },
+    getDepth: function () { return 0; }
+  });
+  var relayPanel = InvitePanel($('relayInvitePanel'), {
+    role: 'relay',
+    getStream: function () { return (upstream && upstream.fsm.state === 'connected') ? remoteStream : null; },
+    getDepth: function () { return myDepth; }
+  });
+  function applyI18n() {
+    document.querySelectorAll('[data-i18n]').forEach(function (n) {
+      n.textContent = t(n.getAttribute('data-i18n'));
+    });
+    document.documentElement.lang = lang;
+    $('langJa').classList.toggle('active', lang === 'ja');
+    $('langEn').classList.toggle('active', lang === 'en');
+    bcPanel.renderTexts();
+    relayPanel.renderTexts();
+    refreshAll();
+  }
+  $('langJa').addEventListener('click', function () { lang = 'ja'; localStorage.setItem('nagare.lang', lang); applyI18n(); });
+  $('langEn').addEventListener('click', function () { lang = 'en'; localStorage.setItem('nagare.lang', lang); applyI18n(); });
+  $('btnStart').addEventListener('click', function () { startBroadcast().catch(function () { /* reason shown */ }); });
+  $('btnStop').addEventListener('click', stopBroadcast);
+  $('srcQuality').addEventListener('change', updateUplinkEstimate);
+  $('btnJoin').addEventListener('click', function () { doJoin($('joinInvite').value).catch(function () { /* reason shown */ }); });
+  $('btnCopyAnswer').addEventListener('click', function () { copyText($('joinAnswer').value); });
+  $('btnChatSend').addEventListener('click', function () {
+    if (doSendChat($('chatInput').value)) $('chatInput').value = '';
+  });
+  $('chatInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { if (doSendChat($('chatInput').value)) $('chatInput').value = ''; }
+  });
+  window.addEventListener('beforeunload', function () { sendByeAll('peer-left'); });
+
+  // Invite link: the fragment is never sent to any server.
+  if (location.hash.indexOf('#i=') === 0) {
+    $('joinInvite').value = location.hash.slice(3);
+    logEvent(t('inviteFromLink'));
+  }
+
+  bindSettings();
+  applyI18n();
+  refreshAll();
+  setInterval(statsTick, 2000);
+
+  // ---------------- automation / test API ----------------
+  window.NAGARE = {
+    core: core,
+    api: {
+      setLang: function (l) { lang = l; localStorage.setItem('nagare.lang', lang); applyI18n(); },
+      setName: function (n) { $('setName').value = n; settings.name = n; saveSettings(); },
+      setSettings: function (obj) {
+        if (obj.stun !== undefined) { settings.stun = obj.stun; $('setStun').value = obj.stun; }
+        if (obj.maxChildren !== undefined) { settings.maxChildren = obj.maxChildren; $('setMaxChildren').value = obj.maxChildren; }
+        if (obj.maxDepth !== undefined) { settings.maxDepth = obj.maxDepth; $('setMaxDepth').value = obj.maxDepth; }
+        saveSettings();
+      },
+      startBroadcast: startBroadcast,
+      stopBroadcast: stopBroadcast,
+      createInvite: function () { return panelCreate(bcPanel); },
+      acceptAnswer: function (code) { return panelAccept(bcPanel, code); },
+      join: doJoin,
+      leave: leaveStream,
+      createRelayInvite: function () { return panelCreate(relayPanel); },
+      acceptRelayAnswer: function (code) { return panelAccept(relayPanel, code); },
+      sendChat: doSendChat,
+      getSnapshot: function () {
+        var rv = $('remoteVideo');
+        var lv = $('localVideo');
+        return {
+          lang: lang, broadcasting: broadcasting, myDepth: myDepth,
+          audienceTotal: audienceTotal, viewers: audienceTotal !== null ? audienceTotal : mySubtree(),
+          upstream: upstream ? { state: upstream.fsm.state, reason: upstream.fsm.reason } : null,
+          sessions: allSessions().map(function (s) {
+            return { id: s.id, dir: s.dir, state: s.fsm.state, reason: s.fsm.reason, peerName: s.peerName, subtree: s.subtree, kbpsUp: s.kbpsUp, kbpsDown: s.kbpsDown,
+              ice: s.pc ? s.pc.iceConnectionState : null, conn: s.pc ? s.pc.connectionState : null,
+              sig: s.pc ? s.pc.signalingState : null, candCount: s.candidates.length,
+              dcState: s.dc ? s.dc.readyState : null };
+          }),
+          chat: chatLogData.slice(),
+          remoteVideo: { videoWidth: rv.videoWidth, videoHeight: rv.videoHeight, currentTime: rv.currentTime, readyState: rv.readyState, paused: rv.paused },
+          localVideo: { videoWidth: lv.videoWidth, videoHeight: lv.videoHeight, readyState: lv.readyState },
+          lastError: lastError
+        };
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+{"description":"Serverless P2P live streaming in a single HTML file. No server is operated by anyone.","name":"nagare","private":true,"scripts":{"test":"node --test tests/core.test.js","test:e2e":"node tests/e2e/run.js"},"version":"0.1.0"}
