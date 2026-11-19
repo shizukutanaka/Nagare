@@ -6,6 +6,11 @@ WebRTC で直接つながり、視聴者が中継者（リレー）になるこ�
 （`nagare.html`）で、外部依存はゼロです。ダウンロードしてブラウザで開くだけで
 使えます（静的ホスティングに置いても構いません）。
 
+**正規の配布形態はデスクトップアプリ（ソフトウェア）です。** 同じ `nagare.html`
+を Electron の殻で包んだもので、[Releases](https://github.com/shizukutanaka/Nagare/releases)
+から入手できます（Windows=portable `.exe`／macOS=`.zip`／Linux=`.AppImage`）。
+単一 HTML 版も引き続き同梱しますが、デスクトップ版を基準とします。
+
 ![配信画面](docs/screenshot-broadcast.png)
 ![視聴画面](docs/screenshot-watch.png)
 
@@ -61,6 +66,27 @@ WebRTC で直接つながり、視聴者が中継者（リレー）になるこ�
 - TURN（任意。URL・ユーザー名・パスワード。端末内にのみ保存）
 - ツリー上限（1人あたりの中継数 1〜6、中継段数 1〜8）
 - 表示名、UI 言語（日本語／英語）
+
+## デスクトップ版
+
+- 殻（`desktop/main.js`）は `nagare.html` をそのまま読み込むだけで、アプリ本体には
+  手を加えていません。contextIsolation 有効／nodeIntegration 無効／sandbox 有効／
+  preload なしで動きます。
+- 新しいウィンドウと `nagare.html` 以外への遷移は遮断します。http／https のリンクは
+  OS の既定ブラウザで開きます。
+- 権限はメディア関連（カメラ／マイク／画面共有）のみ許可し、それ以外（位置情報・
+  通知など）は拒否します。
+- デスクトップ版では招待リンクがローカルファイルのパスになるため、相手には
+  招待コードを渡してください。
+- **未署名です。** Windows では SmartScreen（「Windows によって PC が保護されました」
+  →「詳細情報」→「実行」）、macOS では Gatekeeper（右クリック→「開く」、または
+  「システム設定 > プライバシーとセキュリティ」から許可）の警告が出ることがあります。
+
+```sh
+npm ci            # electron / electron-builder は版数固定（package-lock 同梱）
+npm start         # 殻を起動
+npm run dist:win  # または dist:mac / dist:linux（出力先 dist-desktop/）
+```
 
 ## 開発とテスト
 

@@ -1,1 +1,47 @@
-{"description":"Serverless P2P live streaming in a single HTML file. No server is operated by anyone.","name":"nagare","private":true,"scripts":{"test":"node --test tests/core.test.js","test:e2e":"node tests/e2e/run.js"},"version":"0.1.0"}
+{
+  "description": "Serverless P2P live streaming in a single HTML file. No server is operated by anyone.",
+  "name": "nagare",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/core.test.js",
+    "test:e2e": "node tests/e2e/run.js",
+    "start": "electron .",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "dist:linux": "electron-builder --linux --publish never"
+  },
+  "version": "0.1.0",
+  "main": "desktop/main.js",
+  "build": {
+    "appId": "io.github.shizukutanaka.nagare",
+    "productName": "Nagare",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "nagare.html",
+      "desktop/main.js",
+      "LICENSE"
+    ],
+    "artifactName": "Nagare-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": "portable"
+    },
+    "mac": {
+      "target": "zip",
+      "category": "public.app-category.video",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Nagare uses the camera to broadcast live video.",
+        "NSMicrophoneUsageDescription": "Nagare uses the microphone to broadcast live audio."
+      }
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    }
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.0.12"
+  }
+}

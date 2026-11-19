@@ -3,6 +3,9 @@ name: Release
 # Tag-driven distribution: pushing a v* tag publishes a GitHub Release with
 # the product attached. A manual workflow_dispatch run only builds the same
 # files and uploads them as an Actions artifact — it never creates a Release.
+# The desktop job builds the Electron app on all three OSes; on a tag its
+# binaries are attached to the same Release, on a manual run they stay
+# Actions artifacts only.
 
 on:
   push:
@@ -67,3 +70,61 @@ jobs:
             dist/SHA256SUMS.txt \
             --title "${{ needs.package.outputs.version }}" \
             --generate-notes
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: macos-latest
+            target: mac
+          - os: ubuntu-latest
+            target: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install pinned Electron toolchain
+        run: npm ci
+      - name: Build desktop app (unsigned)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run dist:${{ matrix.target }}
+      - name: Upload desktop build as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nagare-desktop-${{ matrix.target }}
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/*.zip
+            dist-desktop/*.AppImage
+          if-no-files-found: error
+
+  desktop-release:
+    # Only a real tag push attaches desktop binaries to the Release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [package, release, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nagare-desktop-*
+          path: desktop
+          merge-multiple: true
+      - name: Attach desktop builds to the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd desktop
+          sha256sum * > SHA256SUMS-desktop.txt
+          gh release upload "${{ needs.package.outputs.version }}" * \
+            --repo "$GITHUB_REPOSITORY" --clobber
